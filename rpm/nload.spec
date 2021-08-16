@@ -33,6 +33,7 @@ Requires:   ncurses-libs >= 5.0
 BuildRequires:  pkgconfig(ncursesw) >= 5.0
 BuildRequires:  automake
 BuildRequires:  autoconf
+BuildRequires:  /usr/bin/python
 BuildRequires:  desktop-file-utils
 Obsoletes:   openrepos-%{name} < %{version}
 
