@@ -38,7 +38,7 @@ PkgBR:
   - automake
   - autoconf
   # OBS build needs it for checking but doesn't find it/
-  - /usr/bin/python
+  - python
 PkgConfigBR:
   - ncursesw >= 5.0
 Builder: make
