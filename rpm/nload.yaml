@@ -1,4 +1,4 @@
-Summary        : A console application which monitors network traffic and bandwidth usage in real time
+Summary        : Monitors network traffic and bandwidth usage in real time
 Name           : nload
 Version        : 0.7.4.180309
 Release        : 6

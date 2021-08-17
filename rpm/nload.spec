@@ -10,7 +10,7 @@ Name:       nload
 %define upstream_name nload
 %define __requires_exclude ^libform|libncurses|libtinfo.*$
 
-Summary:    A console application which monitors network traffic and bandwidth usage in real time
+Summary:    Monitors network traffic and bandwidth usage in real time
 Version:    0.7.4.180309
 Release:    6
 Group:      Applications/System
