@@ -23,11 +23,10 @@ Description: |
   network usage.
 
 Macros:
-  - 'upstream_name;nload'
   # for harbour validator:
   - '__requires_exclude;^libform|libncurses|libtinfo.*$'
 
-# we have a series.conf file, which causes the spec to patch. so we must do -N in autosetup to avoid double patching:
+# we have a series.conf file
 SetupOptions: '-q -n %{name}-%{version}/upstream'
 NoIconCache: true
 Obsoletes:

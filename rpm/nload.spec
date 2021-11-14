@@ -7,7 +7,6 @@ Name:       nload
 
 # >> macros
 # << macros
-%define upstream_name nload
 %define __requires_exclude ^libform|libncurses|libtinfo.*$
 
 Summary:    Monitors network traffic and bandwidth usage in real time
