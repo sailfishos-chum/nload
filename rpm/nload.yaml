@@ -1,7 +1,7 @@
 Summary        : Monitors network traffic and bandwidth usage in real time
 Name           : nload
 Version        : 0.7.4.180309
-Release        : 6
+Release        : 7
 License        : GPLv2
 URL            : http://www.roland-riegel.de/nload/index_en.html
 Group          : Applications/System

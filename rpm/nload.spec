@@ -11,7 +11,7 @@ Name:       nload
 
 Summary:    Monitors network traffic and bandwidth usage in real time
 Version:    0.7.4.180309
-Release:    6
+Release:    7
 Group:      Applications/System
 License:    GPLv2
 URL:        http://www.roland-riegel.de/nload/index_en.html
@@ -61,7 +61,9 @@ network usage.
 %build
 # >> build pre
 # run_autotools
-%{__aclocal}
+# SFOS 4.3 does not have that macro?
+#%%{__aclocal}
+aclocal
 %{__autoheader}
 %{__autoconf}
 %{__automake} --add-missing --copy
