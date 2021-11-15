@@ -63,10 +63,13 @@ network usage.
 # run_autotools
 # SFOS 4.3 does not have that macro?
 #%%{__aclocal}
+#%%{__autoheader}
+#%%{__autoconf}
+#%%{__automake} --add-missing --copy
 aclocal
-%{__autoheader}
-%{__autoconf}
-%{__automake} --add-missing --copy
+autoheader
+autoconf
+automake --add-missing --copy
 # << build pre
 
 %configure --disable-static
