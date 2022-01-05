@@ -42,6 +42,18 @@ usage in real time. It visualizes the in and outgoing traffic using two graphs
 and provides additional info like total amount of transfered data and min/max
 network usage.
 
+%if "%{?vendor}" == "chum"
+Type: console-application
+DeveloperName: nephros
+Categories:
+ - Network
+ - Utility
+ - System
+Icon: https://gitlab.com/nephros/openrepos-nload/-/blob/obs/rpm/nload_512.png
+Screenshots:
+ - https://gitlab.com/nephros/openrepos-nload/-/blob/obs/Screenshot_001.png
+%endif
+
 
 %prep
 %setup -q -n %{name}-%{version}/upstream
