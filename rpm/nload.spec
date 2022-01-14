@@ -44,14 +44,16 @@ network usage.
 
 %if "%{?vendor}" == "chum"
 Type: console-application
-DeveloperName: nephros
+PackagerName: nephros
 Categories:
  - Network
  - Utility
  - System
-Icon: https://gitlab.com/nephros/openrepos-nload/-/blob/obs/rpm/nload_512.png
+Custom:
+  PackagingRepo: https://gitlab.com/nephros/openrepos-nload
+Icon: https://gitlab.com/nephros/openrepos-nload/-/raw/obs/rpm/nload_512.png
 Screenshots:
- - https://gitlab.com/nephros/openrepos-nload/-/blob/obs/Screenshot_001.png
+ - https://gitlab.com/nephros/openrepos-nload/-/raw/obs/Screenshot_001.png
 %endif
 
 
