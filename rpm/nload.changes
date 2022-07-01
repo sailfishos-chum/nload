@@ -1,3 +1,6 @@
+* Fri Jul  1 2022 Nephros <sailfish@nephros.org> - 0.7.4.180309-7
+- move packaging to sailfishos-chum
+
 * Mon Aug 16 2021 Nephros <sailfish@nephros.org> - 0.7.4.180309-6
 - move to OBS/chum
 - obsolete openrepos version

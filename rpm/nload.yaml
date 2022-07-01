@@ -1,9 +1,9 @@
 Summary        : Monitors network traffic and bandwidth usage in real time
 Name           : nload
 Version        : 0.7.4.180309
-Release        : 7
+Release        : 8
 License        : GPLv2
-URL            : http://www.roland-riegel.de/nload/index_en.html
+URL            : http://www.roland-riegel.de/nload/index.html
 Group          : Applications/System
 Sources        :
   - '%{name}-%{version}.tar.gz'
@@ -25,15 +25,18 @@ Description: |
   %if "%{?vendor}" == "chum"
   Type: console-application
   PackagerName: nephros
+  DeveloperName: Roland Riegel
   Categories:
    - Network
    - Utility
-   - System
   Custom:
-    PackagingRepo: https://gitlab.com/nephros/openrepos-nload
-  Icon: https://gitlab.com/nephros/openrepos-nload/-/raw/obs/rpm/nload_512.png
+    PackagingRepo: https://github.com/sailfishos-chum/nload
+    Repo: https://github.com/rolandriegel/nload
+  Icon: https://github.com/sailfishos-chum/nload/raw/master/rpm/nload_256.png
   Screenshots:
-   - https://gitlab.com/nephros/openrepos-nload/-/raw/obs/Screenshot_001.png
+    - https://github.com/sailfishos-chum/nload/raw/master/Screenshot_001.png
+  Urls:
+    Homepage: http://www.roland-riegel.de/nload/index.html
   %endif
 
 Macros:
