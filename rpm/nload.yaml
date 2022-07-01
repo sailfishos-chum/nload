@@ -1,0 +1,47 @@
+Summary        : A console application which monitors network traffic and bandwidth usage in real time
+Name           : nload
+Version        : 0.7.4.180309
+Release        : 6
+License        : GPLv2
+URL            : http://www.roland-riegel.de/nload/index_en.html
+Group          : Applications/System
+Sources        :
+  - '%{name}-%{version}.tar.gz'
+  - 'files/%{name}.desktop'
+  - 'files/%{name}.svgz'
+  - 'files/%{name}_86.png'
+  - 'files/%{name}_108.png'
+  - 'files/%{name}_128.png'
+  - 'files/%{name}_172.png'
+  - 'files/%{name}_256.png'
+  - 'files/%{name}_512.png'
+
+Description: |
+  nload is a console application which monitors network traffic and bandwidth
+  usage in real time. It visualizes the in and outgoing traffic using two graphs
+  and provides additional info like total amount of transfered data and min/max
+  network usage.
+
+Macros:
+  - 'upstream_name;nload'
+  # for harbour validator:
+  - '__requires_exclude;^libform|libncurses|libtinfo.*$'
+
+# we have a series.conf file, which causes the spec to patch. so we must do -N in autosetup to avoid double patching:
+SetupOptions: '-q -n %{name}-%{version}/upstream'
+NoIconCache: true
+Obsoletes:
+  - openrepos-%{name} < %{version}
+Requires:
+  - ncurses-libs >= 5.0
+PkgBR:
+  - automake
+  - autoconf
+PkgConfigBR:
+  - ncursesw >= 5.0
+Builder: make
+Files:
+  - '%{_bindir}/%{name}'
+  - '%{_datadir}/icons/hicolor/*/apps/%{name}.png'
+  - '%{_datadir}/icons/hicolor/scalable/apps/%{name}.svgz'
+  - '%{_datadir}/applications/%{name}.desktop'

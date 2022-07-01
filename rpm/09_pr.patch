@@ -1,0 +1,28 @@
+From 3ae6110b648011d226526f1a5aca7708d0d03e15 Mon Sep 17 00:00:00 2001
+From: PB <3854688+uno20001@users.noreply.github.com>
+Date: Tue, 10 Mar 2020 08:39:49 +0100
+Subject: [PATCH] circular navigation in traffic_window
+
+implement circular navigation for interfaces in traffic_window
+---
+ src/traffic_window.cpp | 7 +++++--
+ 1 file changed, 5 insertions(+), 2 deletions(-)
+
+diff --git a/src/traffic_window.cpp b/src/traffic_window.cpp
+index 004d420..014cc7a 100644
+--- a/src/traffic_window.cpp
++++ b/src/traffic_window.cpp
+@@ -61,8 +61,11 @@ void TrafficWindow::printTraffic(const vector<DeviceView*>& deviceViews)
+     if(deviceViews.empty())
+         return;
+ 
+-    if((unsigned int) m_curDev >= deviceViews.size() || m_curDev < 0)
+-        m_curDev = 0;
++    if(m_curDev < 0)
++        m_curDev = (int)deviceViews.size() + (m_curDev % (int)deviceViews.size());
++
++    if(m_curDev >= (int)deviceViews.size())
++        m_curDev %= (int)deviceViews.size();
+ 
+     // print data of the current device(s)
+     if(!showMultipleDevices())

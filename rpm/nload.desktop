@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=nload
+Icon=nload
+Exec=invoker --type=generic sh -c "LANG=en_GB.UTF8 exec fingerterm -e nload"
+X-Nemo-Application-Type=generic
+Categories=ConsoleOnly;System;Network;
+Keywords=system;network

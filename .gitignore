@@ -1,0 +1,5 @@
+.*.swp
+build.log
+build.log.old
+build/
+build-local.sh

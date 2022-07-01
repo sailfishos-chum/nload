@@ -1,0 +1,4 @@
+[submodule "upstream"]
+	path = upstream
+	url = https://github.com/rolandriegel/nload
+	branch = a5715a77eb2c11702a7ffc7664240b9250cafa4d

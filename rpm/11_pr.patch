@@ -1,0 +1,833 @@
+From 91278883205081a15b05b421ffbff41f68999518 Mon Sep 17 00:00:00 2001
+From: Kirby Zhou <kirbyzhou@sogou-inc.com>
+Date: Wed, 6 Jan 2021 18:02:10 +0800
+Subject: [PATCH 1/5] add -I option, show traffic stats of each interval
+ instead of one second.
+
+---
+ src/app.cpp        | 6 ++++++
+ src/statistics.cpp | 4 ++++
+ 2 files changed, 10 insertions(+)
+
+diff --git a/src/app.cpp b/src/app.cpp
+index 04bb63c..3fcf498 100644
+--- a/src/app.cpp
++++ b/src/app.cpp
+@@ -207,6 +207,11 @@ int App::run(const vector<string>& arguments)
+                 break;
+             }
+         }
++        // has the user set to show statistics of single interval instead of second?
++        else if (*itArg == "-I")
++        {
++            SettingStore::get("StatisticsOfInterval") = true;
++        }
+         // has the user set a non-default unit for traffic numbers?
+         else if(*itArg == "-u")
+         {
+@@ -518,6 +523,7 @@ void App::printHelp(bool error)
+         << "                Default is " << STANDARD_MAX_DEFLECTION << ".\n"
+         << "-t interval     Determines the refresh interval of the display in milliseconds.\n"
+         << "                Default is " << STANDARD_REFRESH_INTERVAL << ".\n"
++        << "-I              Show traffic stats of each interval instead of one second.\n"
+         << "-u h|b|k|m|g    Sets the type of unit used for the display of traffic numbers.\n"
+         << "   H|B|K|M|G    h: auto, b: Bit/s, k: kBit/s, m: MBit/s etc.\n"
+         << "                H: auto, B: Byte/s, K: kByte/s, M: MByte/s etc.\n"
+diff --git a/src/statistics.cpp b/src/statistics.cpp
+index eccd505..2175df8 100644
+--- a/src/statistics.cpp
++++ b/src/statistics.cpp
+@@ -230,6 +230,10 @@ unsigned int Statistics::getAverageWindow()
+ 
+ unsigned int Statistics::getSecondWindow()
+ {
++    bool statisticsOfInterval = SettingStore::get("StatisticsOfInterval");
++    if (statisticsOfInterval)
++        return 1;
++
+     unsigned int refreshInterval = SettingStore::get("RefreshInterval");
+     unsigned int secondWindow = (unsigned int) (1000.0 / refreshInterval);
+ 
+
+From 2f1e6ba679f057c8c7b820ea243e7a49dc23f17e Mon Sep 17 00:00:00 2001
+From: Kirby Zhou <kirbyzhou@sogou-inc.com>
+Date: Wed, 6 Jan 2021 18:02:43 +0800
+Subject: [PATCH 2/5] add --phy option, show traffic stats of phy(nic) rx/tx
+ bytes instead of rx/tx bytes.
+
+---
+ src/Makefile.am               |   3 +-
+ src/app.cpp                   |   7 +
+ src/devreader-linux-ioctl.cpp | 233 ++++++++++++++++++++++++++++++++++
+ src/devreader-linux-ioctl.h   |  57 +++++++++
+ src/devreaderfactory.cpp      |   8 +-
+ 5 files changed, 306 insertions(+), 2 deletions(-)
+ create mode 100644 src/devreader-linux-ioctl.cpp
+ create mode 100644 src/devreader-linux-ioctl.h
+
+diff --git a/src/Makefile.am b/src/Makefile.am
+index b297560..0f7d4bc 100644
+--- a/src/Makefile.am
++++ b/src/Makefile.am
+@@ -38,7 +38,8 @@ endif
+ 
+ if HAVE_LINUX
+ nload_SOURCES += \
+-	devreader-linux.cpp devreader-linux.h			\
++	devreader-linux.cpp devreader-linux.h \
++	devreader-linux-ioctl.cpp devreader-linux-ioctl.h \
+ 	devreader-linux-proc.cpp devreader-linux-proc.h \
+ 	devreader-linux-sys.cpp devreader-linux-sys.h
+ endif
+diff --git a/src/app.cpp b/src/app.cpp
+index 3fcf498..6fe6ce0 100644
+--- a/src/app.cpp
++++ b/src/app.cpp
+@@ -343,6 +343,11 @@ int App::run(const vector<string>& arguments)
+             outputFile = *itNextArg;
+             ++itArg;
+         }
++        // has the user set to show statistics of phy(nic) rx/tx bytes instead of rx/tx bytes?
++        else if (*itArg == "--phy")
++        {
++            SettingStore::get("StatisticsOfPhyBytes") = true;
++        }
+         // obsolete -b option
+         else if(*itArg == "-b")
+         {
+@@ -533,6 +538,8 @@ void App::printHelp(bool error)
+         << "-f filename     Append traffic data to the named file.\n"
+         << "devices         Network devices to use.\n"
+         << "                Default is to use all auto-detected devices.\n"
++        << "--phy           Show traffic stats of phy(nic) rx/tx bytes instead of rx/tx bytes.\n"
++        << "                It helps to monitor RDMA traffics.\n"
+         << "--help\n"
+         << "-h              Print this help.\n\n"
+ 
+diff --git a/src/devreader-linux-ioctl.cpp b/src/devreader-linux-ioctl.cpp
+new file mode 100644
+index 0000000..e002a58
+--- /dev/null
++++ b/src/devreader-linux-ioctl.cpp
+@@ -0,0 +1,233 @@
++/*
++ * nload
++ * real time monitor for network traffic
++ * Copyright (C) 2001 - 2012 by Roland Riegel <feedback@roland-riegel.de>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
++ */
++
++#include "devreader-linux-ioctl.h"
++#include "stringutils.h"
++#include "settingstore.h"
++#include "setting.h"
++
++#include <fstream>
++#include <list>
++#include <string>
++#include <stdexcept>
++
++#include <sys/types.h>
++#include <sys/socket.h>
++#include <sys/stat.h>
++#include <sys/ioctl.h>
++#include <string.h>
++#include <unistd.h>
++#include <errno.h>
++#include <malloc.h>
++#include <alloca.h>
++#include <linux/if.h>
++#include <linux/sockios.h>
++#include <linux/ethtool.h>
++
++using namespace std;
++
++DevReaderLinuxIoctl::DevReaderLinuxIoctl(const string& deviceName)
++    : DevReader(deviceName)
++    , m_fd(-1)
++    , m_n_stats(0)
++    , m_datain_id(-1), m_dataout_id(-1)
++    , m_packetin_id(-1), m_packetout_id(-1)
++    , m_errorsin_id(-1), m_errorsout_id(-1)
++    , m_dropsin_id(-1), m_dropsout_id(-1)
++{
++    if (!init()) {
++        close(m_fd);
++        m_fd = -1;
++    }
++}
++
++bool DevReaderLinuxIoctl::init()
++{
++    // get all strings of ETH_SS_STATS, find rx_byte / tx_byte
++    this->m_fd = socket(AF_INET, SOCK_DGRAM, 0);
++
++    if (this->m_fd < 0)
++        //throw std::runtime_error("create socket failed");
++        return false;
++
++    struct ifreq ifr;
++
++    { // get count of ETH_SS_STATS
++        struct {
++            struct ethtool_sset_info hdr;
++            unsigned int buf[1];
++        } sset_info;
++        
++        sset_info.hdr.cmd = ETHTOOL_GSSET_INFO;
++        sset_info.hdr.reserved = 0;
++        sset_info.hdr.sset_mask = 1ULL << ETH_SS_STATS;
++
++        memset(&ifr, 0, sizeof(ifr));
++        strcpy(ifr.ifr_name, this->m_deviceName.c_str());
++        ifr.ifr_data = (void*)&sset_info;
++        int ret = ioctl(this->m_fd, SIOCETHTOOL, &ifr);
++        if (0 != ret) {
++            //throw std::runtime_error("ETHTOOL_GSSET_INFO(ETH_SS_STATS) failed");
++            return false;
++        }
++        this->m_n_stats = sset_info.hdr.sset_mask ? sset_info.hdr.data[0] : 0;
++    }
++
++    { // get names of stats
++        struct ethtool_gstrings *strings;
++        strings = (ethtool_gstrings*)calloc(1, sizeof(*strings) + this->m_n_stats * ETH_GSTRING_LEN);
++        if (!strings)
++            //throw std::bad_alloc();
++            return false;
++
++        strings->cmd = ETHTOOL_GSTRINGS;
++        strings->string_set = ETH_SS_STATS;
++        strings->len = m_n_stats;
++
++        memset(&ifr, 0, sizeof(ifr));
++        strcpy(ifr.ifr_name, this->m_deviceName.c_str());
++        ifr.ifr_data = (void*)strings;
++        int ret = ioctl(this->m_fd, SIOCETHTOOL, &ifr);
++        if (0 != ret) {
++            //throw std::runtime_error("ETHTOOL_GSTRINGS(ETH_SS_STATS) failed");
++            return false;
++        }
++        bool statofphy = SettingStore::get("StatisticsOfPhyBytes");
++        for (int i = 0; i < (int)strings->len; ++i) {
++            char* p = i*ETH_GSTRING_LEN + (char*)&strings->data[0];
++            //printf("%4d : %s\n", i, p);
++            if (statofphy) {
++                if (strcmp(p, "rx_bytes_phy") == 0) {
++                    this->m_datain_id = i;
++                } else if (strcmp(p, "tx_bytes_phy") == 0) {
++                    this->m_dataout_id = i;
++                } else if (strcmp(p, "rx_bytes_nic") == 0) {
++                    this->m_datain_id = i;
++                } else if (strcmp(p, "tx_bytes_nic") == 0) {
++                    this->m_dataout_id = i;
++                } else if (this->m_datain_id == -1 && strcmp(p, "rx_bytes") == 0) {
++                    this->m_datain_id = i;
++                } else if (this->m_dataout_id == -1 && strcmp(p, "tx_bytes") == 0) {
++                    this->m_dataout_id = i;
++                }
++            } else {
++                if (strcmp(p, "rx_bytes") == 0) {
++                    this->m_datain_id = i;
++                } else if (strcmp(p, "tx_bytes") == 0) {
++                    this->m_dataout_id = i;
++                }
++            }
++            if (strcmp(p, "rx_packets") == 0) {
++                this->m_packetin_id = i;
++            } else if (strcmp(p, "tx_packets") == 0) {
++                this->m_packetout_id = i;
++            } else if (strcmp(p, "rx_total_frames") == 0) {
++                this->m_packetin_id = i;
++            } else if (strcmp(p, "tx_total_frames") == 0) {
++                this->m_packetout_id = i;
++            }
++        }
++        free(strings);
++    }
++    return true;
++}
++
++DevReaderLinuxIoctl::~DevReaderLinuxIoctl()
++{
++    close(this->m_fd);
++}
++
++bool DevReaderLinuxIoctl::isAvailable()
++{
++    // test ETHTOOL_GSSET_INFO on interface lo
++    int fd = socket(AF_INET, SOCK_DGRAM, 0);
++    if (fd < 0)
++        return false;
++    struct ifreq ifr;
++    struct {
++        struct ethtool_sset_info hdr;
++        unsigned int buf[1];
++    } sset_info;
++    
++    sset_info.hdr.cmd = ETHTOOL_GSSET_INFO;
++    sset_info.hdr.reserved = 0;
++    sset_info.hdr.sset_mask = 1ULL << ETH_SS_STATS;
++
++    memset(&ifr, 0, sizeof(ifr));
++    strcpy(ifr.ifr_name, "lo");
++    ifr.ifr_data = (void*)&sset_info;
++    int ret = ioctl(fd, SIOCETHTOOL, &ifr);
++    if (0 != ret) {
++        close(fd);
++        return false;
++    }
++    close(fd);
++    return true;
++}
++
++void DevReaderLinuxIoctl::readFromDevice(DataFrame& dataFrame)
++{
++    if(m_deviceName.empty() || m_fd == -1)
++        return;
++
++    // read device data
++    struct ifreq ifr;
++    struct ethtool_stats *stats;
++
++    size_t sz_stats = sizeof(struct ethtool_stats) + m_n_stats * sizeof(unsigned long long);
++    stats = (ethtool_stats*)alloca(sz_stats);
++    memset(stats, 0, sz_stats); 
++    stats->cmd = ETHTOOL_GSTATS;
++    stats->n_stats = m_n_stats;
++
++    memset(&ifr, 0, sizeof(ifr));
++    strcpy(ifr.ifr_name, m_deviceName.c_str());
++    ifr.ifr_data = (void*)stats;
++    int ret = ioctl(m_fd, SIOCETHTOOL, &ifr);
++    if (0 != ret) {
++        return;
++    }
++
++    // assign data
++    unsigned long long bytesIn = m_datain_id >= 0 ? stats->data[m_datain_id] : 0;
++    unsigned long long packetsIn = m_packetin_id >= 0 ? stats->data[m_packetin_id] : 0;
++    unsigned long long errorsIn = m_errorsin_id >= 0 ? stats->data[m_errorsin_id] : 0;
++    unsigned long long dropsIn = m_dropsin_id >= 0 ? stats->data[m_dropsin_id] : 0;
++    unsigned long long bytesOut = m_dataout_id >= 0 ? stats->data[m_dataout_id] : 0;
++    unsigned long long packetsOut = m_packetout_id >= 0 ? stats->data[m_packetout_id] : 0;
++    unsigned long long errorsOut = m_errorsout_id >= 0 ? stats->data[m_errorsout_id] : 0;
++    unsigned long long dropsOut = m_dropsout_id >= 0 ? stats->data[m_dropsout_id] : 0;
++
++        
++    dataFrame.setTotalDataIn(bytesIn);
++    dataFrame.setTotalDataOut(bytesOut);
++
++    dataFrame.setTotalPacketsIn(packetsIn);
++    dataFrame.setTotalPacketsOut(packetsOut);
++
++    dataFrame.setTotalErrorsIn(errorsIn);
++    dataFrame.setTotalErrorsOut(errorsOut);
++
++    dataFrame.setTotalDropsIn(dropsIn);
++    dataFrame.setTotalDropsOut(dropsOut);
++
++    dataFrame.setValid(true);
++}
++
+diff --git a/src/devreader-linux-ioctl.h b/src/devreader-linux-ioctl.h
+new file mode 100644
+index 0000000..9797bae
+--- /dev/null
++++ b/src/devreader-linux-ioctl.h
+@@ -0,0 +1,57 @@
++/*
++ * nload
++ * real time monitor for network traffic
++ * Copyright (C) 2001 - 2012 by Roland Riegel <feedback@roland-riegel.de>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, write to the Free Software
++ * Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA  02111-1307, USA.
++ */
++
++#ifndef DEVREADER_LINUX_IOCTL_H
++#define DEVREADER_LINUX_IOCTL_H
++
++#include "devreader.h"
++
++#include <string>
++#include <list>
++
++class DevReaderLinuxIoctl : public DevReader
++{
++    public:
++        DevReaderLinuxIoctl(const std::string& deviceName);
++        virtual ~DevReaderLinuxIoctl();
++
++        static bool isAvailable();
++        
++    protected:
++        void readFromDevice(DataFrame& dataFrame);
++
++    private:
++        bool init();
++
++        int m_fd;
++        int m_n_stats;
++        int m_datain_id;
++        int m_dataout_id;
++        int m_packetin_id;
++        int m_packetout_id;
++        int m_errorsin_id;
++        int m_errorsout_id;
++        int m_dropsin_id;
++        int m_dropsout_id;
++};
++
++#endif
++
++
+diff --git a/src/devreaderfactory.cpp b/src/devreaderfactory.cpp
+index c267a03..2973791 100644
+--- a/src/devreaderfactory.cpp
++++ b/src/devreaderfactory.cpp
+@@ -25,10 +25,13 @@
+ #include "devreader.h"
+ #include "devreader-bsd.h"
+ #include "devreader-hpux.h"
++#include "devreader-linux-ioctl.h"
+ #include "devreader-linux-proc.h"
+ #include "devreader-linux-sys.h"
+ #include "devreader-linux.h"
+ #include "devreader-solaris.h"
++#include "settingstore.h"
++#include "setting.h"
+ 
+ #include <string>
+ #include <list>
+@@ -110,13 +113,16 @@ const map<string, DevReader*>& DevReaderFactory::getAllDevReaders()
+ DevReader* DevReaderFactory::createDevReader(const string& deviceName)
+ {
+     DevReader* reader = 0;
++    bool statofphy = SettingStore::get("StatisticsOfPhyBytes");
+     
+ #if defined HAVE_BSD
+     reader = new DevReaderBsd(deviceName);
+ #elif defined HAVE_HPUX
+     reader = new DevReaderHpux(deviceName);
+ #elif defined HAVE_LINUX
+-    if(DevReaderLinuxSys::isAvailable())
++    if (statofphy && DevReaderLinuxIoctl::isAvailable())
++	reader = new DevReaderLinuxIoctl(deviceName);
++    else if(DevReaderLinuxSys::isAvailable())
+         reader = new DevReaderLinuxSys(deviceName);
+     else if(DevReaderLinuxProc::isAvailable())
+         reader = new DevReaderLinuxProc(deviceName);
+
+From 8e022f6fbaf7847d60fcf2eb07844cbea4f38f10 Mon Sep 17 00:00:00 2001
+From: Kirby Zhou <kirbyzhou@sogou-inc.com>
+Date: Wed, 30 Jun 2021 16:49:21 +0800
+Subject: [PATCH 3/5] add --rdma --rx --tx --list-props for RDMA
+
+---
+ src/app.cpp                   | 55 +++++++++++++++++++++++++++++++++++
+ src/devreader-linux-ioctl.cpp | 24 +++++++++++++--
+ src/devreaderfactory.cpp      |  4 +--
+ 3 files changed, 79 insertions(+), 4 deletions(-)
+
+diff --git a/src/app.cpp b/src/app.cpp
+index 6fe6ce0..8194b63 100644
+--- a/src/app.cpp
++++ b/src/app.cpp
+@@ -348,6 +348,38 @@ int App::run(const vector<string>& arguments)
+         {
+             SettingStore::get("StatisticsOfPhyBytes") = true;
+         }
++        else if (*itArg == "--rdma")
++        {
++            SettingStore::get("StatisticsOfRDMABytes") = true;
++        }
++        else if (*itArg == "--list-props")
++        {
++            SettingStore::get("ListStatProps") = true;
++        }
++        else if(*itArg == "--rx")
++        {
++            if(!haveNextArg)
++            {
++                cerr << "Missing argument for the --rx parameter." << endl;
++                printHelpAndExit = true;
++                break;
++            }
++
++            SettingStore::get("NameOfRxProp") = *itNextArg;
++            ++itArg;
++        }
++        else if(*itArg == "--tx")
++        {
++            if(!haveNextArg)
++            {
++                cerr << "Missing argument for the --tx parameter." << endl;
++                printHelpAndExit = true;
++                break;
++            }
++
++            SettingStore::get("NameOfTxProp") = *itNextArg;
++            ++itArg;
++        }
+         // obsolete -b option
+         else if(*itArg == "-b")
+         {
+@@ -356,6 +388,11 @@ int App::run(const vector<string>& arguments)
+         else if(*itArg == "-s")
+         {
+         }
++        // unknown parameter
++        else if((*itArg)[0] == '-')
++        {
++            printHelpAndExit = true;
++        }
+         // assume unknown parameter to be the network device
+         else
+         {
+@@ -381,6 +418,18 @@ int App::run(const vector<string>& arguments)
+     DevReaderFactory::findAllDevices();
+     const map<string, DevReader*>& deviceReaders = DevReaderFactory::getAllDevReaders();
+ 
++    // list all props if required
++    if (SettingStore::get("ListStatProps")) {
++        for(map<string, DevReader*>::const_iterator itDevice = deviceReaders.begin(); itDevice != deviceReaders.end(); ++itDevice)
++        {
++            Device* device = new Device(itDevice->second);
++            device->update();
++            delete device;
++        }
++        return 0;
++    }
++
++
+     // create one instance of the Device class per device
+     vector<Device*> devices;
+     for(map<string, DevReader*>::const_iterator itDevice = deviceReaders.begin(); itDevice != deviceReaders.end(); ++itDevice)
+@@ -540,6 +589,12 @@ void App::printHelp(bool error)
+         << "                Default is to use all auto-detected devices.\n"
+         << "--phy           Show traffic stats of phy(nic) rx/tx bytes instead of rx/tx bytes.\n"
+         << "                It helps to monitor RDMA traffics.\n"
++        << "--rdma          Show traffic stats of [rx|tx]_vport_rdma_unicast_bytes instead of rx/tx bytes.\n"
++        << "                It helps to monitor RDMA traffics.\n"
++        << "--list-props    List all statistics propertis available. (ioctl/SIOCETHTOOL)\n"
++        << "--rx propname   Use propname to monitor rx bytes\n"
++        << "--tx propname   Use propname to monitor tx bytes\n"
++        << "                It helps to monitor RDMA traffics.\n"
+         << "--help\n"
+         << "-h              Print this help.\n\n"
+ 
+diff --git a/src/devreader-linux-ioctl.cpp b/src/devreader-linux-ioctl.cpp
+index e002a58..245f47e 100644
+--- a/src/devreader-linux-ioctl.cpp
++++ b/src/devreader-linux-ioctl.cpp
+@@ -110,9 +110,14 @@ bool DevReaderLinuxIoctl::init()
+             return false;
+         }
+         bool statofphy = SettingStore::get("StatisticsOfPhyBytes");
++        bool statofrdma = SettingStore::get("StatisticsOfRDMABytes");
++        std::string nameofrxprop = SettingStore::get("NameOfRxProp");
++        std::string nameoftxprop = SettingStore::get("NameOfTxProp");
++        //fprintf(stderr, "%s statofrdma=%d\n", this->m_deviceName.c_str(), statofrdma);
+         for (int i = 0; i < (int)strings->len; ++i) {
+             char* p = i*ETH_GSTRING_LEN + (char*)&strings->data[0];
+-            //printf("%4d : %s\n", i, p);
++            if (SettingStore::get("ListStatProps"))
++                printf("%s[%d] = %s\n", this->m_deviceName.c_str(), i, p);
+             if (statofphy) {
+                 if (strcmp(p, "rx_bytes_phy") == 0) {
+                     this->m_datain_id = i;
+@@ -127,9 +132,24 @@ bool DevReaderLinuxIoctl::init()
+                 } else if (this->m_dataout_id == -1 && strcmp(p, "tx_bytes") == 0) {
+                     this->m_dataout_id = i;
+                 }
++            } if (statofrdma) {
++                if (strcmp(p, "rx_vport_rdma_unicast_bytes") == 0) {
++                    this->m_datain_id = i;
++                } else if (strcmp(p, "tx_vport_rdma_unicast_bytes") == 0) {
++                    this->m_dataout_id = i;
++                }
+             } else {
+-                if (strcmp(p, "rx_bytes") == 0) {
++                if (!nameofrxprop.empty()) {
++                    if (strcmp(p, nameofrxprop.c_str()) == 0) {
++                        this->m_datain_id = i;
++                    }
++                } else if (strcmp(p, "rx_bytes") == 0) {
+                     this->m_datain_id = i;
++                }
++                if (!nameoftxprop.empty()) {
++                    if (strcmp(p, nameoftxprop.c_str()) == 0) {
++                        this->m_dataout_id = i;
++                    }
+                 } else if (strcmp(p, "tx_bytes") == 0) {
+                     this->m_dataout_id = i;
+                 }
+diff --git a/src/devreaderfactory.cpp b/src/devreaderfactory.cpp
+index 2973791..0e2aa5c 100644
+--- a/src/devreaderfactory.cpp
++++ b/src/devreaderfactory.cpp
+@@ -113,14 +113,14 @@ const map<string, DevReader*>& DevReaderFactory::getAllDevReaders()
+ DevReader* DevReaderFactory::createDevReader(const string& deviceName)
+ {
+     DevReader* reader = 0;
+-    bool statofphy = SettingStore::get("StatisticsOfPhyBytes");
++    //bool ioctl_required = SettingStore::get("StatisticsOfPhyBytes") || SettingStore::get("StatisticsOfRDMABytes");
+     
+ #if defined HAVE_BSD
+     reader = new DevReaderBsd(deviceName);
+ #elif defined HAVE_HPUX
+     reader = new DevReaderHpux(deviceName);
+ #elif defined HAVE_LINUX
+-    if (statofphy && DevReaderLinuxIoctl::isAvailable())
++    if (DevReaderLinuxIoctl::isAvailable())
+ 	reader = new DevReaderLinuxIoctl(deviceName);
+     else if(DevReaderLinuxSys::isAvailable())
+         reader = new DevReaderLinuxSys(deviceName);
+
+From ffd063b70e754ae14c7859c74b37e0d32d2f7da1 Mon Sep 17 00:00:00 2001
+From: kirbyzhou <kirbyzhou@sogou-inc.com>
+Date: Wed, 30 Jun 2021 17:16:24 +0800
+Subject: [PATCH 4/5] bump version to 0.7.4.1
+
+---
+ configure.ac | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/configure.ac b/configure.ac
+index d489879..2cde8bb 100644
+--- a/configure.ac
++++ b/configure.ac
+@@ -1,7 +1,7 @@
+ dnl Helder Correia <helder.correia@netcabo.pt>
+ dnl Process this file with autoconf to produce a configure script.
+ 
+-AC_INIT([nload], [0.7.4], [feedback@roland-riegel.de])
++AC_INIT([nload], [0.7.4.1], [feedback@roland-riegel.de])
+ 
+ AC_CANONICAL_HOST
+ 
+
+From db9546c1b448dc01159ccdc10176d53bdbf023e0 Mon Sep 17 00:00:00 2001
+From: kirbyzhou <kirbyzhou@sogou-inc.com>
+Date: Fri, 2 Jul 2021 12:28:27 +0800
+Subject: [PATCH 5/5] add support of /sys/class/infiniband
+
+---
+ src/devreader-linux-sys.cpp | 133 ++++++++++++++++++++++++++++++++++++
+ src/devreader-linux-sys.h   |   6 ++
+ src/devreaderfactory.cpp    |   6 +-
+ 3 files changed, 143 insertions(+), 2 deletions(-)
+
+diff --git a/src/devreader-linux-sys.cpp b/src/devreader-linux-sys.cpp
+index 331ef52..898e246 100644
+--- a/src/devreader-linux-sys.cpp
++++ b/src/devreader-linux-sys.cpp
+@@ -77,10 +77,118 @@ list<string> DevReaderLinuxSys::findAllDevices()
+ 
+     closedir(sysDir);
+ 
++    list<string> ibs = findAllDevices_ib();
++    interfaceNames.splice(interfaceNames.end(), ibs);
++
++    return interfaceNames;
++}
++
++list<string> DevReaderLinuxSys::findAllDevices_ib()
++{
++    list<string> interfaceNames;
++    DIR* sysDir = opendir("/sys/class/infiniband");
++    struct dirent* sysDirEntry = 0;
++    struct stat sysStat;
++
++    if(!sysDir)
++        return interfaceNames;
++
++    while((sysDirEntry = readdir(sysDir)))
++    {
++        string interfaceName(sysDirEntry->d_name);
++
++        if(interfaceName[0] == '.')
++            continue;
++
++        if(stat(("/sys/class/infiniband/" + interfaceName + "/counters").c_str(), &sysStat) == 0 &&
++                S_ISDIR(sysStat.st_mode))
++            interfaceNames.push_back("ib:" + interfaceName);
++
++        DIR* portsDir = opendir(("/sys/class/infiniband/" + interfaceName + "/ports").c_str());
++        struct dirent* portsDirEntry = 0;
++        if (!portsDir)
++            continue;
++        while((portsDirEntry = readdir(portsDir)))
++        {
++            string portname(portsDirEntry->d_name);
++            if(portname[0] == '.')
++                continue;
++
++            if(stat(("/sys/class/infiniband/" + interfaceName + "/ports/"+ portname + "/counters").c_str(), &sysStat) < 0 ||
++                    !S_ISDIR(sysStat.st_mode))
++                continue;
++            interfaceNames.push_back("ib:" + interfaceName + ":" + portname);
++        }
++
++    }
++
++    closedir(sysDir);
++
+     return interfaceNames;
+ }
+ 
+ void DevReaderLinuxSys::readFromDevice(DataFrame& dataFrame)
++{
++    if (m_deviceName.substr(0,3) == "ib:") {
++        readFromDevice_ib(dataFrame);
++    } else {
++        readFromDevice_nic(dataFrame);
++    }
++}
++
++void DevReaderLinuxSys::readFromDevice_ib(DataFrame& dataFrame)
++{
++    string devPath = "/sys/class/infiniband/";
++    devPath += ibname_of(m_deviceName);
++    if (!portname_of(m_deviceName).empty()) {
++        devPath += "/ports/";
++        devPath += portname_of(m_deviceName);
++    }
++
++    struct stat sysStat;
++    if(stat(devPath.c_str(), &sysStat) < 0 || ! S_ISDIR(sysStat.st_mode))
++        return;
++
++    // magic number *4 here
++    dataFrame.setTotalDataIn(readULongSysEntry_ib("counters/port_rcv_data")*4);
++    dataFrame.setTotalDataOut(readULongSysEntry_ib("counters/port_xmit_data")*4);
++
++    dataFrame.setTotalPacketsIn(readULongSysEntry_ib("counters/port_rcv_packets"));
++    dataFrame.setTotalPacketsOut(readULongSysEntry_ib("counters/port_xmit_packets"));
++
++    dataFrame.setTotalErrorsIn(readULongSysEntry_ib("counters/port_rcv_errors"));
++    //dataFrame.setTotalErrorsOut(readULongSysEntry_ib(""));
++
++    //dataFrame.setTotalDropsIn(readULongSysEntry_ib(""));
++    dataFrame.setTotalDropsOut(readULongSysEntry_ib("counters/port_xmit_discards"));
++
++    dataFrame.setValid(true);
++}
++
++unsigned long long DevReaderLinuxSys::readULongSysEntry_ib(const string& entry)
++{
++    string sysEntryPath = "/sys/class/infiniband/";
++    sysEntryPath += ibname_of(m_deviceName);
++    if (!portname_of(m_deviceName).empty()) {
++        sysEntryPath += "/ports/";
++        sysEntryPath += portname_of(m_deviceName);
++    }
++    sysEntryPath += '/';
++    sysEntryPath += entry;
++
++    ifstream sysEntry(sysEntryPath.c_str());
++    if(!sysEntry.is_open())
++        return 0;
++
++    unsigned long long num = 0;
++    sysEntry >> num;
++    if(sysEntry.fail())
++        return 0;
++
++    return num;
++}
++
++void DevReaderLinuxSys::readFromDevice_nic(DataFrame& dataFrame)
+ {
+     string devPath = "/sys/class/net/";
+     devPath += m_deviceName;
+@@ -123,4 +231,29 @@ unsigned long long DevReaderLinuxSys::readULongSysEntry(const string& entry)
+     return num;
+ }
+ 
++// extract "mlx5_0" from "ib:mlx5_0:1"
++std::string DevReaderLinuxSys::ibname_of(const std::string& devname)
++{
++    std::string r = devname;
++    if (devname.substr(0,3) == "ib:")
++            r.erase(0,3);
++    size_t pos = r.rfind(':');
++    if (pos != std::string::npos) {
++        r.erase(pos);
++    }
++    return r;
++}
++
++// extract "1" from "ib:mlx5_0:1"
++std::string DevReaderLinuxSys::portname_of(const std::string& devname)
++{
++    std::string r = devname;
++    if (devname.substr(0,3) == "ib:")
++            r.erase(0,3);
++    size_t pos = r.rfind(':');
++    if (pos != std::string::npos) {
++        return r.substr(pos+1);
++    } else
++        return std::string();
++}
+ 
+diff --git a/src/devreader-linux-sys.h b/src/devreader-linux-sys.h
+index 1ffa776..7a77e1e 100644
+--- a/src/devreader-linux-sys.h
++++ b/src/devreader-linux-sys.h
+@@ -39,7 +39,13 @@ class DevReaderLinuxSys : public DevReader
+         void readFromDevice(DataFrame& dataFrame);
+ 
+     private:
++        static std::list<std::string> findAllDevices_ib();
+         unsigned long long readULongSysEntry(const std::string& entry);
++        void readFromDevice_nic(DataFrame& dataFrame);
++        unsigned long long readULongSysEntry_ib(const std::string& entry);
++        void readFromDevice_ib(DataFrame& dataFrame);
++        static std::string ibname_of(const std::string&);
++        static std::string portname_of(const std::string&);
+ };
+ 
+ #endif
+diff --git a/src/devreaderfactory.cpp b/src/devreaderfactory.cpp
+index 0e2aa5c..f5c865f 100644
+--- a/src/devreaderfactory.cpp
++++ b/src/devreaderfactory.cpp
+@@ -120,8 +120,10 @@ DevReader* DevReaderFactory::createDevReader(const string& deviceName)
+ #elif defined HAVE_HPUX
+     reader = new DevReaderHpux(deviceName);
+ #elif defined HAVE_LINUX
+-    if (DevReaderLinuxIoctl::isAvailable())
+-	reader = new DevReaderLinuxIoctl(deviceName);
++    if (deviceName.substr(0,3) == "ib:")
++        reader = new DevReaderLinuxSys(deviceName);
++    else if (DevReaderLinuxIoctl::isAvailable())
++        reader = new DevReaderLinuxIoctl(deviceName);
+     else if(DevReaderLinuxSys::isAvailable())
+         reader = new DevReaderLinuxSys(deviceName);
+     else if(DevReaderLinuxProc::isAvailable())

@@ -1,0 +1,23 @@
+* Mon Aug 16 2021 Nephros <sailfish@nephros.org> - 0.7.4.180309-6
+- move to OBS/chum
+- obsolete openrepos version
+
+* Mon Aug 16 2021 Nephros <sailfish@nephros.org> - 0.7.4.180309-5
+- move to OBS/chum
+
+* Tue Jul 19 2021 Nephros <sailfish@nephros.org> - 0.7.4.180309-4
+- improve icon a bit
+
+* Tue Jul 13 2021 Nephros <sailfish@nephros.org> - 0.7.4.180309-2
+- update to upstream latest master
+- add most of the upstream of PRs as patches
+
+* Tue Jul 13 2021 Nephros <sailfish@nephros.org> - 0.7.4.180309-1
+- update to upstream latest master
+
+* Tue Jul 13 2021 Nephros <sailfish@nephros.org> - 0.7.4-2
+- patch for ncurses detection and reducing flicker
+- first build for SFOS
+
+* Tue Jul 13 2021 Nephros <sailfish@nephros.org> - 0.7.4-1
+- first build for SFOS
